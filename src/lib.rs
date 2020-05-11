@@ -58,41 +58,42 @@
 //!
 #![crate_type = "lib"]
 
-#[macro_use] extern crate error_chain;
+#[macro_use]
+extern crate error_chain;
 extern crate libc;
-extern crate time;
 extern crate log;
+extern crate time;
 
 use std::env;
-use std::path::Path;
-use std::fmt::{self,Arguments};
+use std::fmt::{self, Arguments};
 use std::io::{self, BufWriter, Write};
-use std::sync::{Arc,Mutex};
-use std::net::{SocketAddr,ToSocketAddrs,UdpSocket,TcpStream};
+use std::net::{SocketAddr, TcpStream, ToSocketAddrs, UdpSocket};
 #[cfg(unix)]
 use std::os::unix::net::{UnixDatagram, UnixStream};
+use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use libc::getpid;
-use log::{Log, Metadata, Record, Level};
+use log::{Level, Log, Metadata, Record};
+
+pub use errors::*;
+pub use facility::Facility;
+pub use format::{Formatter3164, Formatter5424, LogFormat};
+pub use format::Severity;
 
 mod facility;
 mod format;
 mod errors;
-pub use facility::Facility;
-pub use format::Severity;
-pub use errors::*;
-
-pub use format::{LogFormat, Formatter3164, Formatter5424};
 
 pub type Priority = u8;
 
 /// Main logging structure
 pub struct Logger<Backend: Write, Formatter> {
   formatter: Formatter,
-  backend:   Backend,
+  backend: Backend,
 }
 
-impl<W:Write, F> Logger<W, F> {
+impl<W: Write, F> Logger<W, F> {
   pub fn new(backend: W, formatter: F) -> Self {
     Logger { backend, formatter }
   }
@@ -141,7 +142,7 @@ pub enum LoggerBackend {
   #[cfg(not(unix))]
   UnixStream(()),
   Udp(UdpSocket, SocketAddr),
-  Tcp(BufWriter<TcpStream>)
+  Tcp(BufWriter<TcpStream>),
 }
 
 impl Write for LoggerBackend {
@@ -151,50 +152,50 @@ impl Write for LoggerBackend {
       #[cfg(unix)]
       LoggerBackend::Unix(ref dgram) => {
         dgram.send(&message[..])
-      },
+      }
       #[cfg(unix)]
       LoggerBackend::UnixStream(ref mut socket) => {
-        let null = [0 ; 1];
+        let null = [0; 1];
         socket.write(&message[..]).and_then(|sz| {
           socket.write(&null).map(|_| sz)
         })
-      },
-      LoggerBackend::Udp(ref socket, ref addr)    => {
+      }
+      LoggerBackend::Udp(ref socket, ref addr) => {
         socket.send_to(&message[..], addr)
-      },
-      LoggerBackend::Tcp(ref mut socket)         => {
+      }
+      LoggerBackend::Tcp(ref mut socket) => {
         socket.write(&message[..])
-      },
+      }
       #[cfg(not(unix))]
       LoggerBackend::Unix(_) | LoggerBackend::UnixStream(_)
-        => Err(io::Error::new(io::ErrorKind::Other, "unsupported platform"))
+      => Err(io::Error::new(io::ErrorKind::Other, "unsupported platform"))
     }
   }
 
-  fn write_fmt(&mut self, args: Arguments) -> io::Result<()>  {
+  fn write_fmt(&mut self, args: Arguments) -> io::Result<()> {
     match *self {
       #[cfg(unix)]
       LoggerBackend::Unix(ref dgram) => {
         let message = fmt::format(args);
         dgram.send(message.as_bytes()).map(|_| ())
-      },
+      }
       #[cfg(unix)]
       LoggerBackend::UnixStream(ref mut socket) => {
-        let null = [0 ; 1];
+        let null = [0; 1];
         socket.write_fmt(args).and_then(|_| {
           socket.write(&null).map(|_| ())
         })
-      },
-      LoggerBackend::Udp(ref socket, ref addr)    => {
+      }
+      LoggerBackend::Udp(ref socket, ref addr) => {
         let message = fmt::format(args);
         socket.send_to(message.as_bytes(), addr).map(|_| ())
-      },
-      LoggerBackend::Tcp(ref mut socket)         => {
+      }
+      LoggerBackend::Tcp(ref mut socket) => {
         socket.write_fmt(args)
-      },
+      }
       #[cfg(not(unix))]
       LoggerBackend::Unix(_) | LoggerBackend::UnixStream(_)
-        => Err(io::Error::new(io::ErrorKind::Other, "unsupported platform"))
+      => Err(io::Error::new(io::ErrorKind::Other, "unsupported platform"))
     }
   }
 
@@ -203,20 +204,20 @@ impl Write for LoggerBackend {
       #[cfg(unix)]
       LoggerBackend::Unix(_) => {
         Ok(())
-      },
+      }
       #[cfg(unix)]
       LoggerBackend::UnixStream(ref mut socket) => {
         socket.flush()
-      },
-      LoggerBackend::Udp(_, _)  => {
+      }
+      LoggerBackend::Udp(_, _) => {
         Ok(())
-      },
-      LoggerBackend::Tcp(ref mut socket)        => {
+      }
+      LoggerBackend::Tcp(ref mut socket) => {
         socket.flush()
-      },
+      }
       #[cfg(not(unix))]
       LoggerBackend::Unix(_) | LoggerBackend::UnixStream(_)
-        => Err(io::Error::new(io::ErrorKind::Other, "unsupported platform"))
+      => Err(io::Error::new(io::ErrorKind::Other, "unsupported platform"))
     }
   }
 }
@@ -224,14 +225,14 @@ impl Write for LoggerBackend {
 /// Returns a Logger using unix socket to target local syslog ( using /dev/log or /var/run/syslog)
 #[cfg(unix)]
 pub fn unix<F: Clone>(formatter: F) -> Result<Logger<LoggerBackend, F>> {
-    unix_connect(formatter.clone(), "/dev/log").or_else(|e| {
-      if let ErrorKind::Io(ref io_err) = *e.kind() {
-        if io_err.kind() == io::ErrorKind::NotFound {
-          return unix_connect(formatter, "/var/run/syslog");
-        }
+  unix_connect(formatter.clone(), "/dev/log").or_else(|e| {
+    if let ErrorKind::Io(ref io_err) = *e.kind() {
+      if io_err.kind() == io::ErrorKind::NotFound {
+        return unix_connect(formatter, "/var/run/syslog");
       }
-      Err(e)
-    }).chain_err(|| ErrorKind::Initialization)
+    }
+    Err(e)
+  }).chain_err(|| ErrorKind::Initialization)
 }
 
 #[cfg(not(unix))]
@@ -255,18 +256,18 @@ fn unix_connect<P: AsRef<Path>, F>(formatter: F, path: P) -> Result<Logger<Logge
   let sock = UnixDatagram::unbound()?;
   match sock.connect(&path) {
     Ok(()) => {
-        Ok(Logger {
-          formatter,
-          backend:   LoggerBackend::Unix(sock),
-        })
-    },
+      Ok(Logger {
+        formatter,
+        backend: LoggerBackend::Unix(sock),
+      })
+    }
     Err(ref e) if e.raw_os_error() == Some(libc::EPROTOTYPE) => {
-        let sock = UnixStream::connect(path)?;
-        Ok(Logger {
-            formatter,
-            backend:   LoggerBackend::UnixStream(BufWriter::new(sock)),
-        })
-    },
+      let sock = UnixStream::connect(path)?;
+      Ok(Logger {
+        formatter,
+        backend: LoggerBackend::UnixStream(BufWriter::new(sock)),
+      })
+    }
     Err(e) => Err(e.into()),
   }
 }
@@ -279,7 +280,7 @@ pub fn udp<T: ToSocketAddrs, F>(formatter: F, local: T, server: T) -> Result<Log
     UdpSocket::bind(local).chain_err(|| ErrorKind::Initialization).and_then(|socket| {
       Ok(Logger {
         formatter,
-        backend:   LoggerBackend::Udp(socket, server_addr),
+        backend: LoggerBackend::Udp(socket, server_addr),
       })
     })
   })
@@ -290,7 +291,7 @@ pub fn tcp<T: ToSocketAddrs, F>(formatter: F, server: T) -> Result<Logger<Logger
   TcpStream::connect(server).chain_err(|| ErrorKind::Initialization).and_then(|socket| {
     Ok(Logger {
       formatter,
-      backend:   LoggerBackend::Tcp(BufWriter::new(socket)),
+      backend: LoggerBackend::Tcp(BufWriter::new(socket)),
     })
   })
 }
@@ -307,7 +308,7 @@ impl BasicLogger {
   }
 }
 
-#[allow(unused_variables,unused_must_use)]
+#[allow(unused_variables, unused_must_use)]
 impl Log for BasicLogger {
   fn enabled(&self, metadata: &Metadata) -> bool {
     true
@@ -319,15 +320,15 @@ impl Log for BasicLogger {
     let mut logger = self.logger.lock().unwrap();
     match record.level() {
       Level::Error => logger.err(message),
-      Level::Warn  => logger.warning(message),
-      Level::Info  => logger.info(message),
+      Level::Warn => logger.warning(message),
+      Level::Info => logger.info(message),
       Level::Debug => logger.debug(message),
       Level::Trace => logger.debug(message)
     };
   }
 
   fn flush(&self) {
-      let _ = self.logger.lock().unwrap().backend.flush();
+    let _ = self.logger.lock().unwrap().backend.flush();
   }
 }
 
@@ -367,7 +368,7 @@ pub fn init_unix_custom<P: AsRef<Path>>(facility: Facility, log_level: log::Leve
   };
   unix_custom(formatter, path).and_then(|logger| {
     log::set_boxed_logger(Box::new(BasicLogger::new(logger)))
-    .chain_err(|| ErrorKind::Initialization)
+      .chain_err(|| ErrorKind::Initialization)
   })?;
 
   log::set_max_level(log_level);
@@ -380,7 +381,7 @@ pub fn init_unix_custom<P: AsRef<Path>>(_facility: Facility, _log_level: log::Le
 }
 
 /// UDP Logger init function compatible with log crate
-pub fn init_udp<T: ToSocketAddrs>(local: T, server: T, hostname:String, facility: Facility, log_level: log::LevelFilter) -> Result<()> {
+pub fn init_udp<T: ToSocketAddrs>(local: T, server: T, hostname: String, facility: Facility, log_level: log::LevelFilter) -> Result<()> {
   let (process, pid) = get_process_info()?;
   let formatter = Formatter3164 {
     facility,
@@ -427,8 +428,8 @@ pub fn init_tcp<T: ToSocketAddrs>(server: T, hostname: String, facility: Facilit
 ///
 /// If `application_name` is `None` name is derived from executable name
 pub fn init(facility: Facility, log_level: log::LevelFilter,
-    application_name: Option<&str>)
-    -> Result<()>
+            application_name: Option<&str>)
+            -> Result<()>
 {
   let (process_name, pid) = get_process_info()?;
   let process = application_name.map(From::from).unwrap_or(process_name);
@@ -441,25 +442,25 @@ pub fn init(facility: Facility, log_level: log::LevelFilter,
 
   let backend = unix(formatter.clone()).map(|logger: Logger<LoggerBackend, Formatter3164>| logger.backend)
     .or_else(|_| {
-        TcpStream::connect(("127.0.0.1", 601))
+      TcpStream::connect(("127.0.0.1", 601))
         .map(|s| LoggerBackend::Tcp(BufWriter::new(s)))
     })
     .or_else(|_| {
-        let udp_addr = "127.0.0.1:514".parse().unwrap();
-        UdpSocket::bind(("127.0.0.1", 0))
+      let udp_addr = "127.0.0.1:514".parse().unwrap();
+      UdpSocket::bind(("127.0.0.1", 0))
         .map(|s| LoggerBackend::Udp(s, udp_addr))
     })?;
-  log::set_boxed_logger(    Box::new(BasicLogger::new(Logger {
-      formatter,
-      backend,
-    }))
+  log::set_boxed_logger(Box::new(BasicLogger::new(Logger {
+    formatter,
+    backend,
+  }))
   ).chain_err(|| ErrorKind::Initialization)?;
 
-    log::set_max_level(log_level);
-    Ok(())
+  log::set_max_level(log_level);
+  Ok(())
 }
 
-fn get_process_info() -> Result<(String,i32)> {
+fn get_process_info() -> Result<(String, i32)> {
   env::current_exe().chain_err(|| ErrorKind::Initialization).and_then(|path| {
     path.file_name().and_then(|os_name| os_name.to_str()).map(|name| name.to_string())
       .chain_err(|| ErrorKind::Initialization)
