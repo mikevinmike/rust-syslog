@@ -50,7 +50,7 @@
 //!     };
 //!
 //!     let logger = syslog::unix(formatter).expect("could not connect to syslog");
-//!     log::set_boxed_logger(Box::new(BasicLogger::new(logger)))
+//!     log::set_boxed_logger(Box::new(BasicLogger::<Formatter3164>::new(logger)))
 //!             .map(|()| log::set_max_level(LevelFilter::Info));
 //!
 //!     info!("hello world");
@@ -64,6 +64,7 @@ extern crate libc;
 extern crate log;
 extern crate time;
 
+use std::collections::HashMap;
 use std::env;
 use std::fmt::{self, Arguments};
 use std::io::{self, BufWriter, Write};
@@ -296,12 +297,12 @@ pub fn tcp<T: ToSocketAddrs, F>(formatter: F, server: T) -> Result<Logger<Logger
   })
 }
 
-pub struct BasicLogger {
-  logger: Arc<Mutex<Logger<LoggerBackend, Formatter3164>>>,
+pub struct BasicLogger<F> {
+  logger: Arc<Mutex<Logger<LoggerBackend, F>>>,
 }
 
-impl BasicLogger {
-  pub fn new(logger: Logger<LoggerBackend, Formatter3164>) -> BasicLogger {
+impl BasicLogger<Formatter3164> {
+  pub fn new(logger: Logger<LoggerBackend, Formatter3164>) -> BasicLogger<Formatter3164> {
     BasicLogger {
       logger: Arc::new(Mutex::new(logger)),
     }
@@ -309,7 +310,7 @@ impl BasicLogger {
 }
 
 #[allow(unused_variables, unused_must_use)]
-impl Log for BasicLogger {
+impl Log for BasicLogger<Formatter3164> {
   fn enabled(&self, metadata: &Metadata) -> bool {
     true
   }
@@ -332,6 +333,40 @@ impl Log for BasicLogger {
   }
 }
 
+impl BasicLogger<Formatter5424> {
+  pub fn new(logger: Logger<LoggerBackend, Formatter5424>) -> BasicLogger<Formatter5424> {
+    BasicLogger {
+      logger: Arc::new(Mutex::new(logger)),
+    }
+  }
+}
+
+#[allow(unused_variables, unused_must_use)]
+impl Log for BasicLogger<Formatter5424> {
+  fn enabled(&self, metadata: &Metadata) -> bool {
+    true
+  }
+
+  fn log(&self, record: &Record) {
+    //FIXME: temporary patch to compile
+    let message_id = 0;
+    let structured_data = HashMap::new();
+    let message = format!("{}", record.args());
+    let mut logger = self.logger.lock().unwrap();
+    match record.level() {
+      log::Level::Error => logger.err((message_id, structured_data, message)),
+      log::Level::Warn => logger.warning((message_id, structured_data, message)),
+      log::Level::Info => logger.info((message_id, structured_data, message)),
+      log::Level::Debug => logger.debug((message_id, structured_data, message)),
+      log::Level::Trace => logger.debug((message_id, structured_data, message))
+    };
+  }
+
+  fn flush(&self) {
+    let _ = self.logger.lock().unwrap().backend.flush();
+  }
+}
+
 /// Unix socket Logger init function compatible with log crate
 #[cfg(unix)]
 pub fn init_unix(facility: Facility, log_level: log::LevelFilter) -> Result<()> {
@@ -343,7 +378,7 @@ pub fn init_unix(facility: Facility, log_level: log::LevelFilter) -> Result<()> 
     pid,
   };
   unix(formatter).and_then(|logger| {
-    log::set_boxed_logger(Box::new(BasicLogger::new(logger))
+    log::set_boxed_logger(Box::new(BasicLogger::<Formatter3164>::new(logger))
     ).chain_err(|| ErrorKind::Initialization)
   })?;
 
@@ -367,7 +402,7 @@ pub fn init_unix_custom<P: AsRef<Path>>(facility: Facility, log_level: log::Leve
     pid,
   };
   unix_custom(formatter, path).and_then(|logger| {
-    log::set_boxed_logger(Box::new(BasicLogger::new(logger)))
+    log::set_boxed_logger(Box::new(BasicLogger::<Formatter3164>::new(logger)))
       .chain_err(|| ErrorKind::Initialization)
   })?;
 
@@ -390,7 +425,7 @@ pub fn init_udp<T: ToSocketAddrs>(local: T, server: T, hostname: String, facilit
     pid,
   };
   udp(formatter, local, server).and_then(|logger| {
-    log::set_boxed_logger(Box::new(BasicLogger::new(logger))).chain_err(|| ErrorKind::Initialization)
+    log::set_boxed_logger(Box::new(BasicLogger::<Formatter3164>::new(logger))).chain_err(|| ErrorKind::Initialization)
   })?;
 
   log::set_max_level(log_level);
@@ -408,7 +443,7 @@ pub fn init_tcp<T: ToSocketAddrs>(server: T, hostname: String, facility: Facilit
   };
 
   tcp(formatter, server).and_then(|logger| {
-    log::set_boxed_logger(Box::new(BasicLogger::new(logger))).chain_err(|| ErrorKind::Initialization)
+    log::set_boxed_logger(Box::new(BasicLogger::<Formatter3164>::new(logger))).chain_err(|| ErrorKind::Initialization)
   })?;
 
   log::set_max_level(log_level);
@@ -450,7 +485,7 @@ pub fn init(facility: Facility, log_level: log::LevelFilter,
       UdpSocket::bind(("127.0.0.1", 0))
         .map(|s| LoggerBackend::Udp(s, udp_addr))
     })?;
-  log::set_boxed_logger(Box::new(BasicLogger::new(Logger {
+  log::set_boxed_logger(Box::new(BasicLogger::<Formatter3164>::new(Logger {
     formatter,
     backend,
   }))
