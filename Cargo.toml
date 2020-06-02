@@ -14,6 +14,7 @@ libc        = "^0.2"
 time        = "^0.1"
 log         = { version =  "^0.4", features = [ "std" ] }
 error-chain = { version = "^0.12", default-features = false }
+simplelog = "0.8.0"
 
 [features]
 nightly = []
